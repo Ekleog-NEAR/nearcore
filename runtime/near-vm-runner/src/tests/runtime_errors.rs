@@ -52,13 +52,37 @@ fn test_simple_contract() {
 }
 
 #[test]
-fn test_multiple_memories() {
+fn test_imported_memory() {
     test_builder()
         .wasm(&[
             0, 97, 115, 109, 1, 0, 0, 0, 2, 12, 1, 3, 101, 110, 118, 0, 2, 1, 239, 1, 248, 1, 4, 6,
             1, 112, 0, 143, 129, 32, 7, 12, 1, 8, 0, 17, 17, 17, 17, 17, 17, 2, 2, 0,
         ])
         // Wasmtime classifies this error as link error at the moment.
+        .opaque_error()
+        .protocol_features(&[
+            #[cfg(feature = "protocol_feature_fix_contract_loading_cost")]
+            ProtocolFeature::FixContractLoadingCost,
+        ])
+        .expects(&[
+            expect![[r#"
+                VMOutcome: balance 4 storage_usage 12 return data None burnt gas 0 used gas 0
+                Err: ...
+            "#]],
+            #[cfg(feature = "protocol_feature_fix_contract_loading_cost")]
+            expect![[r#"
+                VMOutcome: balance 4 storage_usage 12 return data None burnt gas 44982963 used gas 44982963
+                Err: ...
+            "#]],
+        ]);
+}
+
+#[test]
+fn test_multiple_memories() {
+    test_builder()
+        //      | wasm header  | version 1     | mem sect   | 1st mem  | 2nd mem    |
+        //      |              |               | 2 elt 7 byt|          |            |
+        .wasm(b"\x00\x61\x73\x6d\x01\x00\x00\x00\x05\x07\x02\x01\x01\x02\x01\x03\x04")
         .opaque_error()
         .protocol_features(&[
             #[cfg(feature = "protocol_feature_fix_contract_loading_cost")]
