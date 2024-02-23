@@ -3,7 +3,6 @@
 //! Must not use in production!
 // TODO(eth-implicit) Change to a real Wallet Contract implementation.
 
-use hex;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::{env, near_bindgen, AccountId, Promise};
 use rlp::Rlp;
