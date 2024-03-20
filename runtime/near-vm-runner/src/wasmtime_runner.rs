@@ -1,7 +1,7 @@
 use crate::errors::{ContractPrecompilatonResult, IntoVMError};
 use crate::logic::errors::{
-    CompilationError, FunctionCallError, MethodResolveError, PrepareError, VMLogicError,
-    VMRunnerError, WasmTrap,
+    CacheError, CompilationError, FunctionCallError, MethodResolveError, PrepareError,
+    VMLogicError, VMRunnerError, WasmTrap,
 };
 use crate::logic::types::PromiseResult;
 use crate::logic::Config;
@@ -11,6 +11,7 @@ use crate::logic::{
 use crate::{imports, prepare, ContractCode};
 use near_parameters::vm::VMKind;
 use near_parameters::RuntimeFeesConfig;
+use near_primitives_core::hash::CryptoHash;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use wasmtime::ExternType::Func;
@@ -154,14 +155,20 @@ impl WasmtimeVM {
 impl crate::runner::VM for WasmtimeVM {
     fn run(
         &self,
-        code: &ContractCode,
+        _code_hash: CryptoHash,
+        code: Option<&ContractCode>,
         method_name: &str,
         ext: &mut dyn External,
-        context: VMContext,
+        context: &VMContext,
         fees_config: &RuntimeFeesConfig,
         promise_results: &[PromiseResult],
         _cache: Option<&dyn CompiledContractCache>,
     ) -> Result<VMOutcome, VMRunnerError> {
+        let Some(code) = code else {
+            return Err(VMRunnerError::CacheError(CacheError::ReadError(std::io::Error::from(
+                std::io::ErrorKind::NotFound,
+            ))));
+        };
         let mut config = self.default_wasmtime_config();
         let engine = get_engine(&mut config);
         let mut store = Store::new(&engine, ());

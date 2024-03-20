@@ -26,7 +26,7 @@ use near_primitives::receipt::{DelayedReceiptIndices, Receipt, ReceivedData};
 pub use near_primitives::shard_layout::ShardUId;
 use near_primitives::trie_key::{trie_key_parsers, TrieKey};
 use near_primitives::types::{AccountId, StateRoot};
-use near_vm_runner::logic::{CompiledContract, CompiledContractCache};
+use near_vm_runner::logic::{CompiledContractCache, CompiledContractInfo};
 use near_vm_runner::ContractCode;
 
 use crate::db::{refcount, DBIterator, DBOp, DBSlice, DBTransaction, Database, StoreStatistics};
@@ -892,7 +892,7 @@ impl StoreCompiledContractCache {
 /// Key must take into account VM being used and its configuration, so that
 /// we don't cache non-gas metered binaries, for example.
 impl CompiledContractCache for StoreCompiledContractCache {
-    fn put(&self, key: &CryptoHash, value: CompiledContract) -> io::Result<()> {
+    fn put(&self, key: &CryptoHash, value: CompiledContractInfo) -> io::Result<()> {
         let mut update = crate::db::DBTransaction::new();
         // We intentionally use `.set` here, rather than `.insert`. We don't yet
         // guarantee deterministic compilation, so, if we happen to compile the
@@ -906,9 +906,9 @@ impl CompiledContractCache for StoreCompiledContractCache {
         self.db.write(update)
     }
 
-    fn get(&self, key: &CryptoHash) -> io::Result<Option<CompiledContract>> {
+    fn get(&self, key: &CryptoHash) -> io::Result<Option<CompiledContractInfo>> {
         match self.db.get_raw_bytes(DBCol::CachedContractCode, key.as_ref()) {
-            Ok(Some(bytes)) => Ok(Some(CompiledContract::try_from_slice(&bytes)?)),
+            Ok(Some(bytes)) => Ok(Some(CompiledContractInfo::try_from_slice(&bytes)?)),
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }

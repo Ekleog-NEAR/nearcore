@@ -32,7 +32,7 @@ pub struct VMLogic<'a> {
     /// receipts creation.
     ext: &'a mut dyn External,
     /// Part of Context API and Economics API that was extracted from the receipt.
-    context: VMContext,
+    context: &'a VMContext,
     /// All gas and economic parameters required during contract execution.
     pub(crate) config: &'a Config,
     /// Fees for creating (async) actions on runtime.
@@ -127,7 +127,7 @@ impl PublicKeyBuffer {
 impl<'a> VMLogic<'a> {
     pub fn new(
         ext: &'a mut dyn External,
-        context: VMContext,
+        context: &'a VMContext,
         config: &'a Config,
         fees_config: &'a RuntimeFeesConfig,
         promise_results: &'a [PromiseResult],

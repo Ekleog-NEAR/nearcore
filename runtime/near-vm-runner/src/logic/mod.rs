@@ -32,10 +32,16 @@ pub enum CompiledContract {
     Code(Vec<u8>),
 }
 
+#[derive(Debug, Clone, PartialEq, BorshDeserialize, BorshSerialize)]
+pub struct CompiledContractInfo {
+    pub wasm_bytes: usize,
+    pub compiled: CompiledContract,
+}
+
 /// Cache for compiled modules
 pub trait CompiledContractCache: Send + Sync {
-    fn put(&self, key: &CryptoHash, value: CompiledContract) -> std::io::Result<()>;
-    fn get(&self, key: &CryptoHash) -> std::io::Result<Option<CompiledContract>>;
+    fn put(&self, key: &CryptoHash, value: CompiledContractInfo) -> std::io::Result<()>;
+    fn get(&self, key: &CryptoHash) -> std::io::Result<Option<CompiledContractInfo>>;
     fn has(&self, key: &CryptoHash) -> std::io::Result<bool> {
         self.get(key).map(|entry| entry.is_some())
     }

@@ -1,6 +1,6 @@
 use crate::errors::ContractPrecompilatonResult;
 use crate::logic::errors::{CacheError, CompilationError};
-use crate::logic::{CompiledContract, CompiledContractCache, Config};
+use crate::logic::{CompiledContractCache, CompiledContractInfo, Config};
 use crate::runner::VMKindExt;
 use crate::ContractCode;
 use borsh::BorshSerialize;
@@ -15,7 +15,8 @@ enum ContractCacheKey {
     _Version1,
     _Version2,
     _Version3,
-    Version4 {
+    _Version4,
+    Version5 {
         code_hash: CryptoHash,
         vm_config_non_crypto_hash: u64,
         vm_kind: VMKind,
@@ -44,10 +45,10 @@ fn vm_hash(vm_kind: VMKind) -> u64 {
     }
 }
 
-pub fn get_contract_cache_key(code: &ContractCode, config: &Config) -> CryptoHash {
+pub fn get_contract_cache_key(code_hash: CryptoHash, config: &Config) -> CryptoHash {
     let _span = tracing::debug_span!(target: "vm", "get_key").entered();
-    let key = ContractCacheKey::Version4 {
-        code_hash: *code.hash(),
+    let key = ContractCacheKey::Version5 {
+        code_hash,
         vm_config_non_crypto_hash: config.non_crypto_hash(),
         vm_kind: config.vm_kind,
         vm_hash: vm_hash(config.vm_kind),
@@ -57,7 +58,7 @@ pub fn get_contract_cache_key(code: &ContractCode, config: &Config) -> CryptoHas
 
 #[derive(Default)]
 pub struct MockCompiledContractCache {
-    store: Arc<Mutex<HashMap<CryptoHash, CompiledContract>>>,
+    store: Arc<Mutex<HashMap<CryptoHash, CompiledContractInfo>>>,
 }
 
 impl MockCompiledContractCache {
@@ -67,12 +68,12 @@ impl MockCompiledContractCache {
 }
 
 impl CompiledContractCache for MockCompiledContractCache {
-    fn put(&self, key: &CryptoHash, value: CompiledContract) -> std::io::Result<()> {
+    fn put(&self, key: &CryptoHash, value: CompiledContractInfo) -> std::io::Result<()> {
         self.store.lock().unwrap().insert(*key, value);
         Ok(())
     }
 
-    fn get(&self, key: &CryptoHash) -> std::io::Result<Option<CompiledContract>> {
+    fn get(&self, key: &CryptoHash) -> std::io::Result<Option<CompiledContractInfo>> {
         Ok(self.store.lock().unwrap().get(key).map(Clone::clone))
     }
 }
@@ -102,7 +103,7 @@ pub fn precompile_contract(
         Some(it) => it,
         None => return Ok(Ok(ContractPrecompilatonResult::CacheNotAvailable)),
     };
-    let key = get_contract_cache_key(code, config);
+    let key = get_contract_cache_key(*code.hash(), config);
     // Check if we already cached with such a key.
     if cache.has(&key).map_err(CacheError::ReadError)? {
         return Ok(Ok(ContractPrecompilatonResult::ContractAlreadyInCache));
