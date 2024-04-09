@@ -438,11 +438,15 @@ impl NearVM {
             },
         )?;
 
-        let mut memory = NearVmMemory::new(
+        lazy_static::lazy_static! {
+            static ref MEMORIES: crossbeam::queue::ArrayQueue<NearVmMemory> = crossbeam::queue::ArrayQueue::new(1024);
+        }
+        let mut memory = MEMORIES.pop()
+        .unwrap_or_else(|| NearVmMemory::new(
             self.config.limit_config.initial_memory_pages,
             self.config.limit_config.max_memory_pages,
         )
-        .expect("Cannot create memory for a contract call");
+        .expect("Cannot create memory for a contract call"));
         // FIXME: this mostly duplicates the `run_module` method.
         // Note that we don't clone the actual backing memory, just increase the RC.
         let vmmemory = memory.vm();
@@ -459,7 +463,15 @@ impl NearVM {
                 if let Err(e) = result {
                     return Ok(VMOutcome::abort(logic, e));
                 }
-                closure(vmmemory, logic, &artifact)
+                let res = closure(vmmemory, logic, &artifact);
+                let mut mem = memory.0.vmmemory();
+                unsafe {
+                    let mem = mem.as_mut();
+                    mem.base.write_bytes(0, mem.current_length);
+                    mem.current_length = self.config.limit_config.initial_memory_pages as usize * WASM_PAGE_SIZE;
+                }
+                let _ = MEMORIES.push(memory);
+                res
             }
             Err(e) => Ok(VMOutcome::abort(logic, FunctionCallError::CompilationError(e))),
         }
