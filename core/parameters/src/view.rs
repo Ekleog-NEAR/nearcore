@@ -227,6 +227,8 @@ pub struct VMConfigView {
     pub eth_implicit_accounts: bool,
     /// See [`VMConfig::yield_resume_host_functions`].
     pub yield_resume_host_functions: bool,
+    /// See [`VMConfig::lower_initial_contract_memory`].
+    pub lower_initial_contract_memory: bool,
 
     /// Describes limits for VM and Runtime.
     ///
@@ -253,6 +255,7 @@ impl From<crate::vm::Config> for VMConfigView {
             vm_kind: config.vm_kind,
             eth_implicit_accounts: config.eth_implicit_accounts,
             yield_resume_host_functions: config.yield_resume_host_functions,
+            lower_initial_contract_memory: config.lower_initial_contract_memory,
         }
     }
 }
@@ -275,6 +278,7 @@ impl From<VMConfigView> for crate::vm::Config {
             vm_kind: view.vm_kind,
             eth_implicit_accounts: view.eth_implicit_accounts,
             yield_resume_host_functions: view.yield_resume_host_functions,
+            lower_initial_contract_memory: view.lower_initial_contract_memory,
         }
     }
 }

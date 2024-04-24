@@ -326,6 +326,7 @@ impl TryFrom<&ParameterTable> for RuntimeConfig {
                 function_call_weight: params.get(Parameter::FunctionCallWeight)?,
                 eth_implicit_accounts: params.get(Parameter::EthImplicitAccounts)?,
                 yield_resume_host_functions: params.get(Parameter::YieldResume)?,
+                lower_initial_contract_memory: true, // TODO: protocol change
             },
             account_creation_config: AccountCreationConfig {
                 min_allowed_top_level_account_length: params

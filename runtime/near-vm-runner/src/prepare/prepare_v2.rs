@@ -240,8 +240,37 @@ impl<'a> PrepareContext<'a> {
     }
 
     fn memory_import(&self) -> wasm_encoder::EntityType {
+        // First, figure out the requested initial memory
+        // This parsing should be fast enough, as it can skip over whole sections
+        // And considering the memory section is after the import section, we will not
+        // have parsed it yet in the "regular" parse when calling this function.
+        let mut requested_initial_memory = None;
+        let parser = wp::Parser::new(0);
+        'outer: for payload in parser.parse_all(self.code) {
+            if let Ok(wp::Payload::MemorySection(reader)) = payload {
+                for mem in reader {
+                    if let Ok(mem) = mem {
+                        if requested_initial_memory.is_some() {
+                            requested_initial_memory = None;
+                            break 'outer;
+                        }
+                        requested_initial_memory = Some(mem.initial);
+                    }
+                }
+            }
+        }
+
+        // Then, generate a memory import, that has at most the limit-configured initial memory,
+        // but tries to get that number down by using the contract-provided data.
+        let max_initial_memory = requested_initial_memory.unwrap_or(u64::MAX);
+        let config_initial_memory = u64::from(self.config.limit_config.initial_memory_pages);
+        let initial_memory = if self.config.lower_initial_contract_memory {
+            std::cmp::min(max_initial_memory, config_initial_memory)
+        } else {
+            config_initial_memory
+        };
         wasm_encoder::EntityType::Memory(wasm_encoder::MemoryType {
-            minimum: u64::from(self.config.limit_config.initial_memory_pages),
+            minimum: initial_memory,
             maximum: Some(u64::from(self.config.limit_config.max_memory_pages)),
             memory64: false,
             shared: false,

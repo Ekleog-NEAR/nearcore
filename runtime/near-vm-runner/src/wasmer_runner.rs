@@ -268,6 +268,7 @@ impl Wasmer0VM {
         if let Some(cache) = cache {
             let record = CompiledContractInfo {
                 wasm_bytes: code.code().len() as u64,
+                initial_memory_pages: self.config.limit_config.initial_memory_pages,
                 compiled: match &module_or_error {
                     Ok(module) => {
                         let code = module

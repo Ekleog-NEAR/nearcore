@@ -227,6 +227,9 @@ impl Mmap {
     pub fn reset(&mut self) -> Result<(), String> {
         unsafe {
             if self.accessible_len > 0 {
+                if self.accessible_len > 18 * 64 * 1024 {
+                    return Err(String::from("too big memories are not worth resetting"));
+                }
                 self.as_mut_ptr().write_bytes(0, self.accessible_len);
                 region::protect(self.as_ptr(), self.accessible_len, region::Protection::NONE)
                     .map_err(|e| e.to_string())?;

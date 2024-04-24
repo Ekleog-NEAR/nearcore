@@ -141,7 +141,7 @@ impl LinearMemory {
         let mapped_pages = memory.minimum;
         let mapped_bytes = mapped_pages.bytes();
 
-        let alloc = if let Some(alloc) = from_mmap {
+        let alloc = if let Some(mut alloc) = from_mmap {
             // For now we always request the same size, because our prepare step hardcodes a maximum size
             // of 64 MiB. This could change in the future, at which point this assert will start triggering
             // and we’ll need to think of a better way to handle things.
@@ -150,6 +150,7 @@ impl LinearMemory {
                 request_bytes,
                 "Multiple data memory mmap's had different maximal lengths"
             );
+            alloc.make_accessible(mapped_bytes.0).map_err(MemoryError::Region)?;
             alloc
         } else {
             Mmap::accessible_reserved(mapped_bytes.0, request_bytes).map_err(MemoryError::Region)?

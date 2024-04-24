@@ -80,6 +80,7 @@ impl CompiledContract {
 #[derive(Debug, Clone, PartialEq, BorshDeserialize, BorshSerialize)]
 pub struct CompiledContractInfo {
     pub wasm_bytes: u64,
+    pub initial_memory_pages: u32,
     pub compiled: CompiledContract,
 }
 
@@ -314,6 +315,7 @@ impl ContractRuntimeCache for FilesystemContractRuntimeCache {
             }
         }
         temp_file.write_all(&value.wasm_bytes.to_le_bytes())?;
+        temp_file.write_all(&value.initial_memory_pages.to_le_bytes())?;
         let temp_filename = temp_file.into_temp_path();
         // This is atomic, so there wouldn't be instances where getters see an intermediate state.
         rustix::fs::renameat(&self.state.dir, &*temp_filename, &self.state.dir, final_filename)?;
@@ -351,15 +353,17 @@ impl ContractRuntimeCache for FilesystemContractRuntimeCache {
             // The file turns out to be empty/truncated? Treat as if there's no cached file.
             return Ok(None);
         }
-        let wasm_bytes = u64::from_le_bytes(buffer[buffer.len() - 8..].try_into().unwrap());
-        let tag = buffer[buffer.len() - 9];
-        buffer.truncate(buffer.len() - 9);
+        let initial_memory_pages = u32::from_le_bytes(buffer[buffer.len() - 4..].try_into().unwrap());
+        let wasm_bytes = u64::from_le_bytes(buffer[buffer.len() - 12..buffer.len() - 4].try_into().unwrap());
+        let tag = buffer[buffer.len() - 13];
+        buffer.truncate(buffer.len() - 13);
         Ok(match tag {
             CODE_TAG => {
-                Some(CompiledContractInfo { wasm_bytes, compiled: CompiledContract::Code(buffer) })
+                Some(CompiledContractInfo { wasm_bytes, initial_memory_pages, compiled: CompiledContract::Code(buffer) })
             }
             ERROR_TAG => Some(CompiledContractInfo {
                 wasm_bytes,
+                initial_memory_pages,
                 compiled: CompiledContract::CompileModuleError(borsh::from_slice(&buffer)?),
             }),
             // File is malformed? For this code, since we're talking about a cache lets just treat

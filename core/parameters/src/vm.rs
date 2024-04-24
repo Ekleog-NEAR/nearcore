@@ -192,6 +192,9 @@ pub struct Config {
     /// Enable the `promise_yield_create` and `promise_yield_resume` host functions.
     pub yield_resume_host_functions: bool,
 
+    /// Enable the `LowerInitialContractMemory` protocol feature.
+    pub lower_initial_contract_memory: bool,
+
     /// Describes limits for VM and Runtime.
     pub limit_config: LimitConfig,
 }
@@ -224,6 +227,7 @@ impl Config {
         self.ed25519_verify = true;
         self.math_extension = true;
         self.implicit_account_creation = true;
+        self.lower_initial_contract_memory = true;
     }
 }
 

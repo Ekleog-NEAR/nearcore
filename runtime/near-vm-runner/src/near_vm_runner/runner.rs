@@ -8,6 +8,7 @@ use crate::logic::errors::{
 use crate::logic::gas_counter::FastGasCounter;
 use crate::logic::types::PromiseResult;
 use crate::logic::{Config, External, VMContext, VMLogic, VMOutcome};
+use crate::near_vm_runner::memory::PreallocatedMemory;
 use crate::near_vm_runner::{NearVmCompiler, NearVmEngine};
 use crate::runner::VMResult;
 use crate::{
@@ -160,7 +161,7 @@ impl NearVM {
     pub(crate) fn compile_uncached(
         &self,
         code: &ContractCode,
-    ) -> Result<UniversalExecutable, CompilationError> {
+    ) -> Result<(u32, UniversalExecutable), CompilationError> {
         let _span = tracing::debug_span!(target: "vm", "NearVM::compile_uncached").entered();
         let prepared_code = prepare::prepare_contract(code.code(), &self.config, VMKind::NearVm)
             .map_err(CompilationError::PrepareError)?;
@@ -169,6 +170,7 @@ impl NearVM {
             matches!(self.engine.validate(&prepared_code), Ok(_)),
             "near_vm failed to validate the prepared code"
         );
+        let initial_memory_pages = self.initial_memory_pages_for(&prepared_code)?;
         let executable = self
             .engine
             .compile_universal(&prepared_code, &self)
@@ -176,19 +178,20 @@ impl NearVM {
                 tracing::error!(?err, "near_vm failed to compile the prepared code (this is defense-in-depth, the error was recovered from but should be reported to pagoda)");
                 CompilationError::WasmerCompileError { msg: err.to_string() }
             })?;
-        Ok(executable)
+        Ok((initial_memory_pages, executable))
     }
 
     fn compile_and_cache(
         &self,
         code: &ContractCode,
         cache: &dyn ContractRuntimeCache,
-    ) -> Result<Result<UniversalExecutable, CompilationError>, CacheError> {
+    ) -> Result<Result<(u32, UniversalExecutable), CompilationError>, CacheError> {
         let executable_or_error = self.compile_uncached(code);
         let key = get_contract_cache_key(*code.hash(), &self.config);
         let record = CompiledContractInfo {
             wasm_bytes: code.code().len() as u64,
-            compiled: match &executable_or_error {
+            initial_memory_pages: executable_or_error.as_ref().map(|r| r.0).unwrap_or(self.config.limit_config.initial_memory_pages),
+            compiled: match executable_or_error.as_ref().map(|r| &r.1) {
                 Ok(executable) => {
                     let code = executable
                         .serialize()
@@ -220,10 +223,10 @@ impl NearVM {
         method_name: &str,
         closure: impl FnOnce(VMMemory, VMLogic<'_>, &VMArtifact) -> Result<VMOutcome, VMRunnerError>,
     ) -> VMResult<VMOutcome> {
-        // (wasm code size, compilation result)
-        type MemoryCacheType = (u64, Result<VMArtifact, CompilationError>);
+        // (wasm code size, initial memory pages, compilation result)
+        type MemoryCacheType = (u64, u32, Result<VMArtifact, CompilationError>);
         let to_any = |v: MemoryCacheType| -> Box<dyn std::any::Any + Send> { Box::new(v) };
-        let (wasm_bytes, artifact_result) = cache.memory_cache().try_lookup(
+        let (wasm_bytes, initial_memory_pages, artifact_result) = cache.memory_cache().try_lookup(
             code_hash,
             || match code {
                 None => {
@@ -243,9 +246,9 @@ impl NearVM {
                     };
 
                     match &code.compiled {
-                        CompiledContract::CompileModuleError(err) => {
-                            Ok::<_, VMRunnerError>(to_any((code.wasm_bytes, Err(err.clone()))))
-                        }
+                        CompiledContract::CompileModuleError(err) => Ok::<_, VMRunnerError>(
+                            to_any((code.wasm_bytes, code.initial_memory_pages, Err(err.clone()))),
+                        ),
                         CompiledContract::Code(serialized_module) => {
                             let _span =
                                 tracing::debug_span!(target: "vm", "NearVM::load_from_fs_cache")
@@ -269,7 +272,11 @@ impl NearVM {
                                     .load_universal_executable_ref(&executable)
                                     .map(Arc::new)
                                     .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?;
-                                Ok(to_any((code.wasm_bytes, Ok(artifact))))
+                                Ok(to_any((
+                                    code.wasm_bytes,
+                                    code.initial_memory_pages,
+                                    Ok(artifact),
+                                )))
                             }
                         }
                     }
@@ -277,34 +284,39 @@ impl NearVM {
                 Some(code) => {
                     let _span =
                         tracing::debug_span!(target: "vm", "NearVM::build_from_source").entered();
-                    Ok(to_any((
-                        code.code().len() as u64,
+                    let (initial_memory_pages, compiled) =
                         match self.compile_and_cache(code, cache)? {
-                            Ok(executable) => Ok(self
-                                .engine
-                                .load_universal_executable(&executable)
-                                .map(Arc::new)
-                                .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?),
-                            Err(err) => Err(err),
-                        },
-                    )))
+                            Ok((initial_memory_pages, executable)) => (
+                                initial_memory_pages,
+                                Ok(self
+                                    .engine
+                                    .load_universal_executable(&executable)
+                                    .map(Arc::new)
+                                    .map_err(|err| VMRunnerError::LoadingError(err.to_string()))?),
+                            ),
+                            Err(err) => (0, Err(err)),
+                        };
+                    Ok(to_any((code.code().len() as u64, initial_memory_pages, compiled)))
                 }
             },
             move |value| {
                 let _span =
                     tracing::debug_span!(target: "vm", "NearVM::load_from_mem_cache").entered();
-                let &(wasm_bytes, ref downcast) = value
+                let &(wasm_bytes, initial_memory_pages, ref downcast) = value
                     .downcast_ref::<MemoryCacheType>()
                     .expect("downcast should always succeed");
 
-                (wasm_bytes, downcast.clone())
+                (wasm_bytes, initial_memory_pages, downcast.clone())
             },
         )?;
 
+        lazy_static::lazy_static! {
+            static ref MEMORIES: crossbeam::queue::ArrayQueue<PreallocatedMemory> = crossbeam::queue::ArrayQueue::new(16);
+        }
         let mut memory = NearVmMemory::new(
-            self.config.limit_config.initial_memory_pages,
+            initial_memory_pages,
             self.config.limit_config.max_memory_pages,
-            None, // TODO: this should actually reuse the memories
+            MEMORIES.pop(),
         )
         .expect("Cannot create memory for a contract call");
         // FIXME: this mostly duplicates the `run_module` method.
@@ -323,10 +335,36 @@ impl NearVM {
                 if let Err(e) = result {
                     return Ok(VMOutcome::abort(logic, e));
                 }
-                closure(vmmemory, logic, &artifact)
+                let res = closure(vmmemory, logic, &artifact);
+                if let Ok(mmap) = memory.into_preallocated() {
+                    tracing::info!("Reusing a memory");
+                    let _ = MEMORIES.push(mmap);
+                } else {
+                    tracing::error!("Not reusing a memory")
+                }
+                res
             }
             Err(e) => Ok(VMOutcome::abort(logic, FunctionCallError::CompilationError(e))),
         }
+    }
+
+    fn initial_memory_pages_for(&self, code: &[u8]) -> Result<u32, CompilationError> {
+        let parser = wasmparser::Parser::new(0);
+        for payload in parser.parse_all(code) {
+            if let Ok(wasmparser::Payload::ImportSection(reader)) = payload {
+                for mem in reader {
+                    if let Ok(mem) = mem {
+                        if let wasmparser::ImportSectionEntryType::Memory(
+                            wasmparser::MemoryType::M32 { limits, .. },
+                        ) = mem.ty
+                        {
+                            return Ok(limits.initial);
+                        }
+                    }
+                }
+            }
+        }
+        panic!("Tried running a contract that was not prepared with a memory import");
     }
 
     fn run_method(

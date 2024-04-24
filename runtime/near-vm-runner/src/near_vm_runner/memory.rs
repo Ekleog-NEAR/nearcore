@@ -26,7 +26,6 @@ impl NearVmMemory {
         )?)))
     }
 
-    #[cfg(unused)] // TODO: this will be used once we reuse the memories
     pub fn into_preallocated(self) -> Result<PreallocatedMemory, String> {
         Ok(PreallocatedMemory(
             Arc::into_inner(self.0)
